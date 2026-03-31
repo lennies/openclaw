@@ -1,8 +1,10 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { resolveSlackAccount } from "./accounts.js";
 import {
+  createSlackCanvas,
   deleteSlackMessage,
   downloadSlackFile,
+  editSlackCanvas,
   editSlackMessage,
   getSlackMemberInfo,
   listSlackEmojis,
@@ -17,6 +19,7 @@ import {
   unpinSlackMessage,
 } from "./actions.js";
 import { parseSlackBlocksInput } from "./blocks-input.js";
+import { buildSlackAnalyticsBlocks } from "./blocks-render.js";
 import {
   createActionGate,
   imageResultFromFile,
@@ -41,6 +44,7 @@ const messagingActions = new Set([
 
 const reactionsActions = new Set(["react", "reactions"]);
 const pinActions = new Set(["pinMessage", "unpinMessage", "listPins"]);
+const canvasActions = new Set(["createCanvas", "editCanvas"]);
 
 export const slackActionRuntime = {
   deleteSlackMessage,
@@ -120,6 +124,64 @@ function resolveThreadTsFromContext(
 
 function readSlackBlocksParam(params: Record<string, unknown>) {
   return slackActionRuntime.parseSlackBlocksInput(params.blocks);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readJsonLikeParam<T>(
+  params: Record<string, unknown>,
+  key: string,
+  label = key,
+): T | undefined {
+  const raw = params[key];
+  if (raw == null) {
+    return undefined;
+  }
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      throw new Error(`${label} must be valid JSON`);
+    }
+  }
+  return raw as T;
+}
+
+function readSlackRichBlocksParam(params: Record<string, unknown>, intro?: string) {
+  const explicitBlocks = readSlackBlocksParam(params);
+  const richPayload: Parameters<typeof buildSlackAnalyticsBlocks>[0] = {
+    intro,
+    kpis: readJsonLikeParam(params, "kpis") as Parameters<
+      typeof buildSlackAnalyticsBlocks
+    >[0]["kpis"],
+    table: readJsonLikeParam(params, "table"),
+    chart: readJsonLikeParam(params, "chart"),
+  };
+  const hasRichParams = Boolean(richPayload.kpis || richPayload.table || richPayload.chart);
+  if (explicitBlocks && hasRichParams) {
+    throw new Error("Slack rich helpers (kpis/table/chart) cannot be combined with raw blocks.");
+  }
+  if (!hasRichParams) {
+    return explicitBlocks;
+  }
+  return buildSlackAnalyticsBlocks(richPayload);
+}
+
+function readSlackCanvasChangeParam(params: Record<string, unknown>) {
+  const change = readJsonLikeParam<Record<string, unknown>>(params, "change");
+  if (change) {
+    return change;
+  }
+  const changes = readJsonLikeParam<unknown[]>(params, "changes");
+  if (!Array.isArray(changes) || changes.length === 0) {
+    throw new Error("Slack editCanvas requires change (or a single-item changes array).");
+  }
+  if (changes.length !== 1 || !isRecord(changes[0])) {
+    throw new Error("Slack editCanvas supports exactly one change object per call.");
+  }
+  return changes[0];
 }
 
 export async function handleSlackAction(
@@ -216,9 +278,9 @@ export async function handleSlackAction(
           allowEmpty: true,
         });
         const mediaUrl = readStringParam(params, "mediaUrl");
-        const blocks = readSlackBlocksParam(params);
+        const blocks = readSlackRichBlocksParam(params, content ?? undefined);
         if (!content && !mediaUrl && !blocks) {
-          throw new Error("Slack sendMessage requires content, blocks, or mediaUrl.");
+          throw new Error("Slack sendMessage requires content, blocks, mediaUrl, or rich helpers.");
         }
         if (mediaUrl && blocks) {
           throw new Error("Slack sendMessage does not support blocks with mediaUrl.");
@@ -306,9 +368,9 @@ export async function handleSlackAction(
         const content = readStringParam(params, "content", {
           allowEmpty: true,
         });
-        const blocks = readSlackBlocksParam(params);
+        const blocks = readSlackRichBlocksParam(params, content ?? undefined);
         if (!content && !blocks) {
-          throw new Error("Slack editMessage requires content or blocks.");
+          throw new Error("Slack editMessage requires content, blocks, or rich helpers.");
         }
         if (writeOpts) {
           await slackActionRuntime.editSlackMessage(channelId, messageId, content ?? "", {
@@ -387,6 +449,30 @@ export async function handleSlackAction(
       default:
         break;
     }
+  }
+
+  if (canvasActions.has(action)) {
+    if (!isActionEnabled("canvases", false)) {
+      throw new Error(
+        "Slack canvases are disabled. Enable channels.slack.actions.canvases=true to use this feature.",
+      );
+    }
+    if (action === "createCanvas") {
+      const title = readStringParam(params, "title", { required: true });
+      const content = readStringParam(params, "content", { allowEmpty: true }) ?? "";
+      const result = writeOpts
+        ? await createSlackCanvas(title, content, writeOpts)
+        : await createSlackCanvas(title, content);
+      return jsonResult({ ok: true, result });
+    }
+    const canvasId = readStringParam(params, "canvasId", { required: true });
+    const change = readSlackCanvasChangeParam(params);
+    if (writeOpts) {
+      await editSlackCanvas(canvasId, change, writeOpts);
+    } else {
+      await editSlackCanvas(canvasId, change);
+    }
+    return jsonResult({ ok: true });
   }
 
   if (pinActions.has(action)) {

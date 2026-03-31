@@ -336,13 +336,71 @@ Slack actions are controlled by `channels.slack.actions.*`.
 
 Available action groups in current Slack tooling:
 
-| Group      | Default |
-| ---------- | ------- |
-| messages   | enabled |
-| reactions  | enabled |
-| pins       | enabled |
-| memberInfo | enabled |
-| emojiList  | enabled |
+| Group      | Default  |
+| ---------- | -------- |
+| messages   | enabled  |
+| reactions  | enabled  |
+| pins       | enabled  |
+| memberInfo | enabled  |
+| emojiList  | enabled  |
+| canvases   | disabled |
+
+Enable Slack canvases explicitly before exposing those actions to agents:
+
+```yaml
+channels:
+  slack:
+    actions:
+      canvases: true
+```
+
+## Rich analytics blocks
+
+Slack now includes first-class helpers for analytics-style replies without requiring raw Block Kit JSON.
+
+Supported helper payloads on `sendMessage` and `editMessage`:
+
+- `kpis`: render KPI tiles via section fields
+- `table`: render table-style results as monospace section blocks
+- `chart`: render a chart image block via a public QuickChart URL
+
+Example:
+
+```json
+{
+  "action": "sendMessage",
+  "to": "channel:C123",
+  "content": "Marketplace weekly snapshot",
+  "kpis": [
+    { "label": "DAU", "value": "4,321", "delta": "+12% WoW", "trend": "up" },
+    { "label": "Placements", "value": 18 }
+  ],
+  "table": {
+    "title": "Top specialties",
+    "rows": [
+      { "specialty": "ICU", "placements": 7 },
+      { "specialty": "ER", "placements": 5 }
+    ]
+  },
+  "chart": {
+    "title": "Offers by week",
+    "altText": "Line chart of weekly offers",
+    "config": {
+      "type": "line",
+      "data": {
+        "labels": ["W1", "W2"],
+        "datasets": [{ "label": "Offers", "data": [10, 14] }]
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- Rich helpers are additive with `content`, but **cannot** be combined with raw `blocks`.
+- `chart` uses a public QuickChart URL. Do not use it for sensitive or regulated data because the chart config is embedded in the URL.
+- If you need custom Block Kit layout, keep using raw `blocks`.
 
 Current Slack message actions include `send`, `upload-file`, `download-file`, `read`, `edit`, `delete`, `pin`, `unpin`, `list-pins`, `member-info`, and `emoji-list`.
 
@@ -432,6 +490,7 @@ Notes:
         "users:read",
         "app_mentions:read",
         "assistant:write",
+        "canvases:write",
         "reactions:read",
         "reactions:write",
         "pins:read",
@@ -540,6 +599,50 @@ openclaw pairing list slack
   </Accordion>
 </AccordionGroup>
 
+## Canvases (guarded MVP)
+
+OpenClaw exposes two Slack canvas actions:
+
+- `createCanvas`
+- `editCanvas`
+
+This surface is intentionally narrow:
+
+- canvases are **opt-in** via `channels.slack.actions.canvases=true`
+- `createCanvas` uses create-time markdown content instead of multi-op edit loops
+- `editCanvas` supports exactly **one** change object per call
+- missing-scope failures return a friendly error instead of failing silently
+
+Examples:
+
+```json
+{
+  "action": "createCanvas",
+  "title": "Weekly marketplace report",
+  "content": "# Weekly marketplace report\n\n## Summary\n- Placements up 12%\n- PQLs flat"
+}
+```
+
+```json
+{
+  "action": "editCanvas",
+  "canvasId": "F123",
+  "change": {
+    "operation": "insert_at_end",
+    "document_content": {
+      "type": "markdown",
+      "markdown": "\n\n## Appendix\n- Added after initial create"
+    }
+  }
+}
+```
+
+Recommended usage:
+
+- Put the main report body in `createCanvas.content`.
+- Use `editCanvas` only for small, explicit follow-up changes.
+- If Slack returns `missing_scope`, add the required canvas scopes, reinstall the app, and retry.
+
 ## Text streaming
 
 OpenClaw supports Slack native text streaming via the Agents and AI Apps API.
@@ -579,6 +682,7 @@ Legacy keys:
 - Later text chunks append to the same stream (`chat.appendStream`).
 - End of reply finalizes stream (`chat.stopStream`).
 - Media and non-text payloads fall back to normal delivery.
+- Block-rich replies (for example KPI/table/chart answers) reuse the existing draft-preview plumbing and then finalize as normal Slack messages.
 - If streaming fails mid-reply, OpenClaw falls back to normal delivery for remaining payloads.
 
 ## Configuration reference pointers

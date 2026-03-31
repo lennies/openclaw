@@ -4,8 +4,10 @@ import { handleSlackAction, slackActionRuntime } from "./action-runtime.js";
 import { parseSlackBlocksInput } from "./blocks-input.js";
 
 const originalSlackActionRuntime = { ...slackActionRuntime };
+const createSlackCanvas = vi.fn(async (..._args: unknown[]) => ({ canvasId: "F123" }));
 const deleteSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
 const downloadSlackFile = vi.fn(async (..._args: unknown[]) => null);
+const editSlackCanvas = vi.fn(async (..._args: unknown[]) => ({}));
 const editSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
 const getSlackMemberInfo = vi.fn(async (..._args: unknown[]) => ({}));
 const listSlackEmojis = vi.fn(async (..._args: unknown[]) => ({}));
@@ -87,8 +89,10 @@ describe("handleSlackAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.assign(slackActionRuntime, originalSlackActionRuntime, {
+      createSlackCanvas,
       deleteSlackMessage,
       downloadSlackFile,
+      editSlackCanvas,
       editSlackMessage,
       getSlackMemberInfo,
       listSlackEmojis,
@@ -303,7 +307,7 @@ describe("handleSlackAction", () => {
         },
         slackConfig(),
       ),
-    ).rejects.toThrow(/requires content, blocks, or mediaUrl/i);
+    ).rejects.toThrow(/requires content, blocks, mediaUrl, or rich helpers/i);
   });
 
   it("routes uploadFile through sendSlackMessage with upload metadata", async () => {
@@ -381,7 +385,7 @@ describe("handleSlackAction", () => {
         },
         slackConfig(),
       ),
-    ).rejects.toThrow(/requires content or blocks/i);
+    ).rejects.toThrow(/requires content, blocks, or rich helpers/i);
   });
 
   it("auto-injects threadTs from context when replyToMode=all", async () => {

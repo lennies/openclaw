@@ -41,6 +41,18 @@ export type SlackPin = {
   file?: { id?: string; name?: string };
 };
 
+export type SlackCanvasCreateResult = {
+  canvasId: string;
+  url?: string;
+  title?: string;
+};
+
+export type SlackCanvasChange = Record<string, unknown>;
+
+type SlackApiCallClient = WebClient & {
+  apiCall: (method: string, options?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+};
+
 function resolveToken(explicit?: string, accountId?: string) {
   const cfg = loadConfig();
   const account = resolveSlackAccount({ cfg, accountId });
@@ -75,6 +87,81 @@ async function resolveBotUserId(client: WebClient) {
     throw new Error("Failed to resolve Slack bot user id");
   }
   return auth.user_id;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readNestedString(value: unknown, keys: string[]): string | undefined {
+  let current: unknown = value;
+  for (const key of keys) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return typeof current === "string" && current.trim() ? current.trim() : undefined;
+}
+
+function getSlackApiErrorCode(err: unknown): string | undefined {
+  if (!(err instanceof Error)) {
+    return undefined;
+  }
+  const maybeData = err as Error & { data?: { error?: string } };
+  const code = maybeData.data?.error;
+  return typeof code === "string" && code.trim() ? code.trim().toLowerCase() : undefined;
+}
+
+function getSlackNeededScopes(err: unknown): string[] {
+  if (!(err instanceof Error)) {
+    return [];
+  }
+  const maybeData = err as Error & {
+    data?: {
+      needed?: string;
+      response_metadata?: { scopes?: string[]; acceptedScopes?: string[] };
+    };
+  };
+  const needed = typeof maybeData.data?.needed === "string" ? [maybeData.data.needed] : [];
+  const metadata = [
+    ...(maybeData.data?.response_metadata?.scopes ?? []),
+    ...(maybeData.data?.response_metadata?.acceptedScopes ?? []),
+  ];
+  return [...needed, ...metadata].map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+}
+
+function createSlackCanvasScopeError(action: "create" | "edit", err: unknown): Error {
+  const neededScopes = getSlackNeededScopes(err);
+  const scopeHint = neededScopes.length > 0 ? ` Missing scopes: ${neededScopes.join(", ")}.` : "";
+  return new Error(
+    `Slack canvas ${action} requires the Slack app to include canvas scopes and be reinstalled in the workspace.${scopeHint}`,
+  );
+}
+
+function normalizeSlackCanvasCreateResult(
+  response: Record<string, unknown>,
+  fallbackTitle: string,
+): SlackCanvasCreateResult {
+  const canvasId =
+    readNestedString(response, ["canvas_id"]) ??
+    readNestedString(response, ["canvas", "id"]) ??
+    readNestedString(response, ["id"]);
+  if (!canvasId) {
+    throw new Error("Slack canvas create succeeded but did not return a canvas id");
+  }
+  const url =
+    readNestedString(response, ["permalink"]) ??
+    readNestedString(response, ["url"]) ??
+    readNestedString(response, ["canvas", "permalink"]) ??
+    readNestedString(response, ["canvas", "url"]);
+  const title =
+    readNestedString(response, ["title"]) ?? readNestedString(response, ["canvas", "title"]);
+  return {
+    canvasId,
+    ...(url ? { url } : {}),
+    title: title ?? fallbackTitle,
+  };
 }
 
 export async function reactSlackMessage(
@@ -194,6 +281,64 @@ export async function editSlackMessage(
     text: trimmedContent || (blocks ? buildSlackBlocksFallbackText(blocks) : " "),
     ...(blocks ? { blocks } : {}),
   });
+}
+
+export async function createSlackCanvas(
+  title: string,
+  content: string,
+  opts: SlackActionClientOpts = {},
+): Promise<SlackCanvasCreateResult> {
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    throw new Error("Slack canvas title is required");
+  }
+
+  const client = (await getClient(opts)) as SlackApiCallClient;
+  try {
+    const response = await client.apiCall("canvases.create", {
+      title: trimmedTitle,
+      document: {
+        type: "markdown",
+        markdown: content.trim() || " ",
+      },
+    });
+    return normalizeSlackCanvasCreateResult(
+      response as unknown as Record<string, unknown>,
+      trimmedTitle,
+    );
+  } catch (err) {
+    if (getSlackApiErrorCode(err) === "missing_scope") {
+      throw createSlackCanvasScopeError("create", err);
+    }
+    throw err;
+  }
+}
+
+export async function editSlackCanvas(
+  canvasId: string,
+  change: SlackCanvasChange,
+  opts: SlackActionClientOpts = {},
+): Promise<void> {
+  const trimmedCanvasId = canvasId.trim();
+  if (!trimmedCanvasId) {
+    throw new Error("Slack canvas id is required");
+  }
+  if (!isRecord(change) || Object.keys(change).length === 0) {
+    throw new Error("Slack canvas edit requires a single non-empty change object");
+  }
+
+  const client = (await getClient(opts)) as SlackApiCallClient;
+  try {
+    await client.apiCall("canvases.edit", {
+      canvas_id: trimmedCanvasId,
+      changes: [change],
+    });
+  } catch (err) {
+    if (getSlackApiErrorCode(err) === "missing_scope") {
+      throw createSlackCanvasScopeError("edit", err);
+    }
+    throw err;
+  }
 }
 
 export async function deleteSlackMessage(

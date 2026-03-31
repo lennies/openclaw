@@ -9,6 +9,36 @@ function createInvokeSpy() {
 }
 
 describe("handleSlackMessageAction", () => {
+  it("passes rich helper payloads through to sendMessage", async () => {
+    const invoke = createInvokeSpy();
+
+    await handleSlackMessageAction({
+      providerId: "slack",
+      ctx: {
+        action: "send",
+        cfg: {},
+        params: {
+          to: "channel:C2",
+          message: "Weekly snapshot",
+          kpis: [{ label: "DAU", value: 10 }],
+          chart: { config: { type: "bar", data: { labels: ["A"], datasets: [{ data: [1] }] } } },
+        },
+      } as never,
+      invoke: invoke as never,
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "sendMessage",
+        to: "channel:C2",
+        kpis: [{ label: "DAU", value: 10 }],
+        chart: { config: { type: "bar", data: { labels: ["A"], datasets: [{ data: [1] }] } } },
+      }),
+      expect.any(Object),
+      undefined,
+    );
+  });
+
   it("maps upload-file to the internal uploadFile action", async () => {
     const invoke = createInvokeSpy();
 

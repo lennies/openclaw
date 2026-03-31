@@ -65,6 +65,8 @@ export type SlackActionConfig = {
   memberInfo?: boolean;
   channelInfo?: boolean;
   emojiList?: boolean;
+  /** Disabled by default. Enables Slack canvas create/edit actions. */
+  canvases?: boolean;
 };
 
 export type SlackSlashCommandConfig = {

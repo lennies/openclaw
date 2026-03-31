@@ -15,6 +15,17 @@ function readSlackBlocksParam(actionParams: Record<string, unknown>) {
   return parseSlackBlocksInput(actionParams.blocks) as Record<string, unknown>[] | undefined;
 }
 
+function readJsonLikeParam<T>(actionParams: Record<string, unknown>, key: string): T | undefined {
+  const raw = actionParams[key];
+  if (raw == null) {
+    return undefined;
+  }
+  if (typeof raw === "string") {
+    return JSON.parse(raw) as T;
+  }
+  return raw as T;
+}
+
 /** Translate generic channel action requests into Slack-specific tool invocations and payload shapes. */
 export async function handleSlackMessageAction(params: {
   providerId: string;
@@ -43,11 +54,14 @@ export async function handleSlackMessageAction(params: {
     const interactive = normalizeInteractiveReply(actionParams.interactive);
     const interactiveBlocks = interactive ? buildSlackInteractiveBlocks(interactive) : undefined;
     const blocks = readSlackBlocksParam(actionParams) ?? interactiveBlocks;
-    if (!content && !mediaUrl && !blocks) {
-      throw new Error("Slack send requires message, blocks, or media.");
+    const kpis = readJsonLikeParam(actionParams, "kpis");
+    const table = readJsonLikeParam(actionParams, "table");
+    const chart = readJsonLikeParam(actionParams, "chart");
+    if (!content && !mediaUrl && !blocks && !kpis && !table && !chart) {
+      throw new Error("Slack send requires message, blocks, media, or rich helper payloads.");
     }
-    if (mediaUrl && blocks) {
-      throw new Error("Slack send does not support blocks with media.");
+    if (mediaUrl && (blocks || kpis || table || chart)) {
+      throw new Error("Slack send does not support blocks or rich helpers with media.");
     }
     const threadId = readStringParam(actionParams, "threadId");
     const replyTo = readStringParam(actionParams, "replyTo");
@@ -60,6 +74,9 @@ export async function handleSlackMessageAction(params: {
         accountId,
         threadTs: threadId ?? replyTo ?? undefined,
         ...(blocks ? { blocks } : {}),
+        ...(kpis ? { kpis } : {}),
+        ...(table ? { table } : {}),
+        ...(chart ? { chart } : {}),
       },
       cfg,
       ctx.toolContext,
@@ -124,8 +141,11 @@ export async function handleSlackMessageAction(params: {
     });
     const content = readStringParam(actionParams, "message", { allowEmpty: true });
     const blocks = readSlackBlocksParam(actionParams);
-    if (!content && !blocks) {
-      throw new Error("Slack edit requires message or blocks.");
+    const kpis = readJsonLikeParam(actionParams, "kpis");
+    const table = readJsonLikeParam(actionParams, "table");
+    const chart = readJsonLikeParam(actionParams, "chart");
+    if (!content && !blocks && !kpis && !table && !chart) {
+      throw new Error("Slack edit requires message, blocks, or rich helper payloads.");
     }
     return await invoke(
       {
@@ -134,6 +154,9 @@ export async function handleSlackMessageAction(params: {
         messageId,
         content: content ?? "",
         blocks,
+        ...(kpis ? { kpis } : {}),
+        ...(table ? { table } : {}),
+        ...(chart ? { chart } : {}),
         accountId,
       },
       cfg,

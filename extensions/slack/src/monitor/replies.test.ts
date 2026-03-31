@@ -6,7 +6,7 @@ vi.mock("../send.js", () => ({
 }));
 
 let deliverReplies: typeof import("./replies.js").deliverReplies;
-import { deliverSlackSlashReplies } from "./replies.js";
+import { deliverSlackSlashReplies, readSlackReplyBlocks } from "./replies.js";
 
 function baseParams(overrides?: Record<string, unknown>) {
   return {
@@ -163,6 +163,16 @@ describe("deliverReplies identity passthrough", () => {
         }),
       ),
     ).rejects.toThrow(/Slack blocks cannot exceed 50 items/i);
+  });
+
+
+  it("ignores invalid block payloads instead of throwing", () => {
+    expect(
+      readSlackReplyBlocks({
+        text: "",
+        channelData: { slack: { blocks: "{bad-json" } },
+      } as never),
+    ).toBeUndefined();
   });
 });
 

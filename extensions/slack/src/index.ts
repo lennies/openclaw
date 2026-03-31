@@ -5,7 +5,9 @@ export {
   resolveSlackAccount,
 } from "./accounts.js";
 export {
+  createSlackCanvas,
   deleteSlackMessage,
+  editSlackCanvas,
   editSlackMessage,
   getSlackMemberInfo,
   listSlackEmojis,
@@ -19,6 +21,14 @@ export {
   sendSlackMessage,
   unpinSlackMessage,
 } from "./actions.js";
+export {
+  buildQuickChartImageUrl,
+  buildSlackAnalyticsBlocks,
+  buildSlackChartBlocks,
+  buildSlackInteractiveBlocks,
+  buildSlackKpiBlocks,
+  buildSlackTableSectionBlocks,
+} from "./blocks-render.js";
 export { monitorSlackProvider } from "./monitor.js";
 export { probeSlack } from "./probe.js";
 export { sendMessageSlack } from "./send.js";
