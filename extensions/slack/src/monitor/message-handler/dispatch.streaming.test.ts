@@ -1,129 +1,40 @@
 import { describe, expect, it } from "vitest";
-import {
-  isSlackStreamingEnabled,
-  resolveSlackStreamingThreadHint,
-  shouldEnableSlackPreviewStreaming,
-  shouldInitializeSlackDraftStream,
-} from "./dispatch.js";
+import { resolveSlackStreamingThreadHint } from "./dispatch.js";
 
-describe("slack native streaming defaults", () => {
-  it("is enabled for partial mode when native streaming is on", () => {
-    expect(isSlackStreamingEnabled({ mode: "partial", nativeStreaming: true })).toBe(true);
+describe("resolveSlackStreamingThreadHint", () => {
+  it("keeps explicit thread targets when already present", () => {
+    expect(
+      resolveSlackStreamingThreadHint({
+        replyToMode: "all",
+        incomingThreadTs: "111.222",
+        messageTs: "111.222",
+        isThreadReply: true,
+        isDirectMessage: true,
+      }),
+    ).toBe("111.222");
   });
 
-  it("is disabled outside partial mode or when native streaming is off", () => {
-    expect(isSlackStreamingEnabled({ mode: "partial", nativeStreaming: false })).toBe(false);
-    expect(isSlackStreamingEnabled({ mode: "block", nativeStreaming: true })).toBe(false);
-    expect(isSlackStreamingEnabled({ mode: "progress", nativeStreaming: true })).toBe(false);
-    expect(isSlackStreamingEnabled({ mode: "off", nativeStreaming: true })).toBe(false);
-  });
-});
-
-describe("slack native streaming thread hint", () => {
-  it("stays off-thread when replyToMode=off and message is not in a thread", () => {
+  it("auto-threads direct messages for native streaming when no thread target exists", () => {
     expect(
       resolveSlackStreamingThreadHint({
         replyToMode: "off",
         incomingThreadTs: undefined,
-        messageTs: "1000.1",
+        messageTs: "123.456",
+        isThreadReply: false,
+        isDirectMessage: true,
       }),
-    ).toBeUndefined();
+    ).toBe("123.456");
   });
 
-  it("uses first-reply thread when replyToMode=first", () => {
-    expect(
-      resolveSlackStreamingThreadHint({
-        replyToMode: "first",
-        incomingThreadTs: undefined,
-        messageTs: "1000.2",
-      }),
-    ).toBe("1000.2");
-  });
-
-  it("uses the existing incoming thread regardless of replyToMode", () => {
+  it("does not invent thread targets for non-DM messages", () => {
     expect(
       resolveSlackStreamingThreadHint({
         replyToMode: "off",
-        incomingThreadTs: "2000.1",
-        messageTs: "1000.3",
-      }),
-    ).toBe("2000.1");
-  });
-});
-
-describe("slack preview streaming eligibility", () => {
-  it("stays on for room messages when streaming mode is enabled", () => {
-    expect(
-      shouldEnableSlackPreviewStreaming({
-        mode: "partial",
+        incomingThreadTs: undefined,
+        messageTs: "123.456",
+        isThreadReply: false,
         isDirectMessage: false,
       }),
-    ).toBe(true);
-  });
-
-  it("stays off for top-level DMs without a reply thread", () => {
-    expect(
-      shouldEnableSlackPreviewStreaming({
-        mode: "partial",
-        isDirectMessage: true,
-      }),
-    ).toBe(false);
-  });
-
-  it("allows DM preview when the reply is threaded", () => {
-    expect(
-      shouldEnableSlackPreviewStreaming({
-        mode: "partial",
-        isDirectMessage: true,
-        threadTs: "1000.1",
-      }),
-    ).toBe(true);
-  });
-
-  it("keeps top-level DMs off even when replyToMode would create a reply thread", () => {
-    const streamThreadHint = resolveSlackStreamingThreadHint({
-      replyToMode: "all",
-      incomingThreadTs: undefined,
-      messageTs: "1000.4",
-      isThreadReply: false,
-    });
-
-    expect(
-      shouldEnableSlackPreviewStreaming({
-        mode: "partial",
-        isDirectMessage: true,
-        threadTs: undefined,
-      }),
-    ).toBe(false);
-    expect(streamThreadHint).toBe("1000.4");
-  });
-});
-
-describe("slack draft stream initialization", () => {
-  it("stays off when preview streaming is disabled", () => {
-    expect(
-      shouldInitializeSlackDraftStream({
-        previewStreamingEnabled: false,
-        useStreaming: false,
-      }),
-    ).toBe(false);
-  });
-
-  it("stays off when native streaming is active", () => {
-    expect(
-      shouldInitializeSlackDraftStream({
-        previewStreamingEnabled: true,
-        useStreaming: true,
-      }),
-    ).toBe(false);
-  });
-
-  it("turns on only for preview-only paths", () => {
-    expect(
-      shouldInitializeSlackDraftStream({
-        previewStreamingEnabled: true,
-        useStreaming: false,
-      }),
-    ).toBe(true);
+    ).toBeUndefined();
   });
 });

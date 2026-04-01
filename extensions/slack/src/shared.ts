@@ -99,6 +99,8 @@ export function buildSlackSetupLines(botName = "OpenClaw"): string[] {
     "3) Install App to workspace to get the xoxb- bot token",
     "4) Enable Event Subscriptions (socket) for message events",
     "5) App Home -> enable the Messages tab for DMs",
+    "6) Reinstall the app after adding scopes or enabling canvases/AI features in Slack.",
+    "7) Native streaming and canvases depend on workspace-level Slack capabilities in addition to OAuth scopes.",
     "Tip: set SLACK_BOT_TOKEN + SLACK_APP_TOKEN in your env.",
     `Docs: ${formatDocsLink("/slack", "slack")}`,
     "",
@@ -184,16 +186,26 @@ export function createSlackPluginBase(params: {
       nativeCommands: true,
     },
     agentPrompt: {
-      messageToolHints: ({ cfg, accountId }) =>
-        isSlackInteractiveRepliesEnabled({ cfg, accountId })
-          ? [
-              "- Prefer Slack buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one.",
-              "- Slack interactive replies: use `[[slack_buttons: Label:value, Other:other]]` to add action buttons that route clicks back as Slack interaction system events.",
-              "- Slack selects: use `[[slack_select: Placeholder | Label:value, Other:other]]` to add a static select menu that routes the chosen value back as a Slack interaction system event.",
-            ]
-          : [
-              "- Slack interactive replies are disabled. If needed, ask to set `channels.slack.capabilities.interactiveReplies=true` (or the same under `channels.slack.accounts.<account>.capabilities`).",
-            ],
+      messageToolHints: ({ cfg, accountId }) => {
+        const richHints = [
+          "- Slack rich helpers: prefer `kpis`, `table`, `chart`, and `canvas` over hand-built raw blocks when sending structured analytics or reports.",
+          "- `table` accepts rows/columns and renders native Slack table blocks when compact enough, with automatic fallback for larger payloads.",
+          "- `chart` accepts a QuickChart/Chart.js-style config and uploads the rendered chart as a Slack file instead of only linking an external image.",
+          "- `canvas` is for explicit long-form report export. Provide a title plus markdown/content and OpenClaw will create a Slack canvas and post the link back into the conversation.",
+        ];
+        if (isSlackInteractiveRepliesEnabled({ cfg, accountId })) {
+          return [
+            ...richHints,
+            "- Prefer Slack buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one.",
+            "- Slack interactive replies: use `[[slack_buttons: Label:value, Other:other]]` to add action buttons that route clicks back as Slack interaction system events.",
+            "- Slack selects: use `[[slack_select: Placeholder | Label:value, Other:other]]` to add a static select menu that routes the chosen value back as a Slack interaction system event.",
+          ];
+        }
+        return [
+          ...richHints,
+          "- Slack interactive replies are disabled. If needed, ask to set `channels.slack.capabilities.interactiveReplies=true` (or the same under `channels.slack.accounts.<account>.capabilities`).",
+        ];
+      },
     },
     streaming: {
       blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },

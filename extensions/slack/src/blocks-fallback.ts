@@ -2,12 +2,18 @@ import type { Block, KnownBlock } from "@slack/web-api";
 
 type PlainTextObject = { text?: string };
 
+type SlackTableCell = {
+  type?: string;
+  text?: string;
+};
+
 type SlackBlockWithFields = {
   type?: string;
   text?: PlainTextObject & { type?: string };
   title?: PlainTextObject;
   alt_text?: string;
   elements?: Array<{ text?: string; type?: string }>;
+  rows?: SlackTableCell[][];
 };
 
 function cleanCandidate(value: string | undefined): string | undefined {
@@ -42,6 +48,15 @@ function readContextText(block: SlackBlockWithFields): string | undefined {
     .map((element) => cleanCandidate(element.text))
     .filter((value): value is string => Boolean(value));
   return textParts.length > 0 ? textParts.join(" ") : undefined;
+}
+
+function readTableText(block: SlackBlockWithFields): string | undefined {
+  if (!Array.isArray(block.rows) || block.rows.length === 0) {
+    return undefined;
+  }
+  const rowCount = Math.max(block.rows.length - 1, 0);
+  const columnCount = Array.isArray(block.rows[0]) ? block.rows[0].length : 0;
+  return `Shared a table (${rowCount} row${rowCount === 1 ? "" : "s"} × ${columnCount} column${columnCount === 1 ? "" : "s"})`;
 }
 
 export function buildSlackBlocksFallbackText(blocks: (Block | KnownBlock)[]): string {
@@ -85,6 +100,13 @@ export function buildSlackBlocksFallbackText(blocks: (Block | KnownBlock)[]): st
           return text;
         }
         break;
+      }
+      case "table": {
+        const text = readTableText(block);
+        if (text) {
+          return text;
+        }
+        return "Shared a table";
       }
       default:
         break;

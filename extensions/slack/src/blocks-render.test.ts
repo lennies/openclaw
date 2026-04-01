@@ -4,6 +4,8 @@ import {
   buildSlackAnalyticsBlocks,
   buildSlackChartBlocks,
   buildSlackKpiBlocks,
+  buildSlackNativeTableBlocks,
+  buildSlackTableBlocks,
   buildSlackTableSectionBlocks,
 } from "./blocks-render.js";
 
@@ -72,6 +74,51 @@ describe("buildSlackTableSectionBlocks", () => {
   });
 });
 
+describe("buildSlackTableBlocks", () => {
+  it("prefers native Slack table blocks for compact tables", () => {
+    const blocks = buildSlackTableBlocks({
+      title: "Top Specialties",
+      rows: [
+        { specialty: "ICU", pqls: 42, placements: 7 },
+        { specialty: "ER", pqls: 35, placements: 5 },
+      ],
+      columns: [
+        { key: "specialty", label: "Specialty" },
+        { key: "pqls", label: "PQLs", align: "right" },
+        { key: "placements", label: "Placements", align: "right" },
+      ],
+    });
+
+    expect(blocks[0]).toMatchObject({
+      type: "section",
+      text: { type: "mrkdwn", text: "*Top Specialties*" },
+    });
+    expect(blocks[1]).toMatchObject({
+      type: "table",
+      column_settings: [{ align: "left" }, { align: "right" }, { align: "right" }],
+    });
+    expect(buildSlackNativeTableBlocks({ rows: [{ specialty: "ICU" }] })?.[0]).toMatchObject({
+      type: "table",
+    });
+  });
+
+  it("falls back to monospace sections when the native table exceeds Slack limits", () => {
+    const blocks = buildSlackTableBlocks({
+      title: "Wide table",
+      rows: Array.from({ length: 100 }, (_, index) => ({ row: index + 1, value: index + 10 })),
+      columns: [
+        { key: "row", label: "Row" },
+        { key: "value", label: "Value", align: "right" },
+      ],
+    });
+
+    expect(blocks[1]).toMatchObject({
+      type: "section",
+      text: { text: expect.stringContaining("```") },
+    });
+  });
+});
+
 describe("chart helpers", () => {
   it("builds QuickChart URLs and image blocks", () => {
     const url = buildQuickChartImageUrl({
@@ -126,6 +173,7 @@ describe("buildSlackAnalyticsBlocks", () => {
     expect((blocks?.[0] as { text?: { text?: string } }).text?.text).toContain(
       "Marketplace weekly snapshot",
     );
+    expect(blocks?.some((block) => (block as { type?: string }).type === "table")).toBe(true);
     expect(blocks?.some((block) => (block as { type?: string }).type === "image")).toBe(true);
   });
 });

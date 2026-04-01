@@ -112,14 +112,22 @@ export function resolveSlackStreamingThreadHint(params: {
   incomingThreadTs: string | undefined;
   messageTs: string | undefined;
   isThreadReply?: boolean;
+  isDirectMessage?: boolean;
 }): string | undefined {
-  return resolveSlackThreadTs({
+  const resolved = resolveSlackThreadTs({
     replyToMode: params.replyToMode,
     incomingThreadTs: params.incomingThreadTs,
     messageTs: params.messageTs,
     hasReplied: false,
     isThreadReply: params.isThreadReply,
   });
+  if (resolved) {
+    return resolved;
+  }
+  if (params.isDirectMessage) {
+    return params.messageTs;
+  }
+  return undefined;
 }
 
 function shouldUseStreaming(params: {
@@ -327,6 +335,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     incomingThreadTs,
     messageTs,
     isThreadReply,
+    isDirectMessage: prepared.isDirectMessage,
   });
   const previewStreamingEnabled = shouldEnableSlackPreviewStreaming({
     mode: slackStreaming.mode,

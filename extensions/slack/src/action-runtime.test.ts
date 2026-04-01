@@ -4,7 +4,10 @@ import { handleSlackAction, slackActionRuntime } from "./action-runtime.js";
 import { parseSlackBlocksInput } from "./blocks-input.js";
 
 const originalSlackActionRuntime = { ...slackActionRuntime };
-const createSlackCanvas = vi.fn(async (..._args: unknown[]) => ({ canvasId: "F123" }));
+const createSlackCanvas = vi.fn(
+  async (..._args: unknown[]) =>
+    ({ canvasId: "F123" }) as { canvasId: string; url?: string; title?: string },
+);
 const deleteSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
 const downloadSlackFile = vi.fn(async (..._args: unknown[]) => null);
 const editSlackCanvas = vi.fn(async (..._args: unknown[]) => ({}));
@@ -19,7 +22,10 @@ const readSlackMessages = vi.fn(async (..._args: unknown[]) => ({}));
 const removeOwnSlackReactions = vi.fn(async (..._args: unknown[]) => ["thumbsup"]);
 const removeSlackReaction = vi.fn(async (..._args: unknown[]) => ({}));
 const recordSlackThreadParticipation = vi.fn();
-const sendSlackMessage = vi.fn(async (..._args: unknown[]) => ({ channelId: "C123" }));
+const sendSlackMessage = vi.fn(
+  async (..._args: unknown[]) =>
+    ({ channelId: "C123" }) as { channelId: string; messageId?: string },
+);
 const unpinSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
 
 describe("handleSlackAction", () => {
@@ -51,12 +57,27 @@ describe("handleSlackAction", () => {
     return { cfg, context, hasRepliedRef };
   }
 
-  function expectLastSlackSend(content: string, threadTs?: string) {
-    expect(sendSlackMessage).toHaveBeenLastCalledWith("channel:C123", content, {
-      mediaUrl: undefined,
-      threadTs,
-      blocks: undefined,
-    });
+  function expectSlackSend(params: {
+    target?: string;
+    content: string;
+    threadTs?: string;
+    blocks?: unknown;
+  }) {
+    const expectedBlocks = params.blocks ?? [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: params.content },
+      },
+    ];
+    expect(sendSlackMessage).toHaveBeenLastCalledWith(
+      params.target ?? "channel:C123",
+      params.content,
+      expect.objectContaining({
+        mediaUrl: undefined,
+        threadTs: params.threadTs,
+        blocks: expectedBlocks,
+      }),
+    );
   }
 
   async function sendSecondMessageAndExpectNoThread(params: {
@@ -68,7 +89,7 @@ describe("handleSlackAction", () => {
       params.cfg,
       params.context,
     );
-    expectLastSlackSend("Second");
+    expectSlackSend({ content: "Second" });
   }
 
   async function resolveReadToken(cfg: OpenClawConfig): Promise<string | undefined> {
@@ -192,10 +213,9 @@ describe("handleSlackAction", () => {
       },
       slackConfig(),
     );
-    expect(sendSlackMessage).toHaveBeenCalledWith("channel:C123", "Hello thread", {
-      mediaUrl: undefined,
+    expectSlackSend({
+      content: "Hello thread",
       threadTs: "1234567890.123456",
-      blocks: undefined,
     });
   });
 
@@ -332,6 +352,99 @@ describe("handleSlackAction", () => {
     });
   });
 
+  it("uploads chart helpers as a follow-up Slack file", async () => {
+    sendSlackMessage.mockResolvedValueOnce({ channelId: "C123", messageId: "123.456" });
+    sendSlackMessage.mockResolvedValueOnce({ channelId: "C123", messageId: "123.457" });
+
+    await handleSlackAction(
+      {
+        action: "sendMessage",
+        to: "channel:C123",
+        content: "Marketplace snapshot",
+        kpis: [{ label: "DAU", value: "4,321" }],
+        chart: {
+          title: "Offers by week",
+          config: { type: "line", data: { labels: ["W1"], datasets: [{ data: [12] }] } },
+        },
+      },
+      slackConfig(),
+    );
+
+    expect(sendSlackMessage).toHaveBeenCalledTimes(2);
+    expect(sendSlackMessage).toHaveBeenNthCalledWith(
+      1,
+      "channel:C123",
+      "Marketplace snapshot",
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            type: "section",
+            text: expect.objectContaining({ text: "*KPIs*" }),
+          }),
+          expect.objectContaining({ type: "section" }),
+        ]),
+      }),
+    );
+    expect(sendSlackMessage).toHaveBeenNthCalledWith(
+      2,
+      "channel:C123",
+      "Offers by week",
+      expect.objectContaining({
+        mediaUrl: expect.stringContaining("https://quickchart.io/chart?"),
+        uploadFileName: "offers-by-week.png",
+        uploadTitle: "Offers by week",
+        threadTs: "123.456",
+      }),
+    );
+  });
+
+  it("creates and links canvases during sendMessage", async () => {
+    createSlackCanvas.mockResolvedValueOnce({
+      canvasId: "F123",
+      url: "https://slack.com/canvas/F123",
+      title: "Weekly report",
+    });
+    sendSlackMessage.mockResolvedValueOnce({ channelId: "C123", messageId: "123.456" });
+
+    await handleSlackAction(
+      {
+        action: "sendMessage",
+        to: "channel:C123",
+        content: "Short summary",
+        canvas: {
+          title: "Weekly report",
+          markdown: "# Weekly report\nMore detail here",
+        },
+      },
+      slackConfig(),
+    );
+
+    expect(createSlackCanvas).toHaveBeenCalledWith(
+      "Weekly report",
+      "# Weekly report\nMore detail here",
+    );
+    expect(sendSlackMessage).toHaveBeenCalledWith(
+      "channel:C123",
+      "Short summary",
+      expect.objectContaining({
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            type: "section",
+            text: expect.objectContaining({ text: "Short summary" }),
+          }),
+          expect.objectContaining({
+            type: "context",
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                text: "Report canvas: <https://slack.com/canvas/F123|Weekly report>",
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    );
+  });
+
   it("rejects blocks combined with mediaUrl", async () => {
     await expect(
       handleSlackAction(
@@ -344,7 +457,7 @@ describe("handleSlackAction", () => {
         },
         slackConfig(),
       ),
-    ).rejects.toThrow(/does not support blocks with mediaUrl/i);
+    ).rejects.toThrow(/does not support blocks.*mediaUrl/i);
   });
 
   it.each([
@@ -402,7 +515,7 @@ describe("handleSlackAction", () => {
         replyToMode: "all",
       },
     );
-    expectLastSlackSend("Threaded reply", "1111111111.111111");
+    expectSlackSend({ content: "Threaded reply", threadTs: "1111111111.111111" });
   });
 
   it("replyToMode=first threads first message then stops", async () => {
@@ -414,7 +527,7 @@ describe("handleSlackAction", () => {
       context,
     );
 
-    expectLastSlackSend("First", "1111111111.111111");
+    expectSlackSend({ content: "First", threadTs: "1111111111.111111" });
     await sendSecondMessageAndExpectNoThread({ cfg, context });
   });
 
@@ -432,7 +545,7 @@ describe("handleSlackAction", () => {
       context,
     );
 
-    expectLastSlackSend("Explicit", "9999999999.999999");
+    expectSlackSend({ content: "Explicit", threadTs: "9999999999.999999" });
     expect(hasRepliedRef.value).toBe(true);
     await sendSecondMessageAndExpectNoThread({ cfg, context });
   });
@@ -447,7 +560,7 @@ describe("handleSlackAction", () => {
         replyToMode: "first",
       },
     );
-    expectLastSlackSend("No ref");
+    expectSlackSend({ content: "No ref" });
   });
 
   it("does not auto-inject threadTs when replyToMode=off", async () => {
@@ -460,7 +573,7 @@ describe("handleSlackAction", () => {
         replyToMode: "off",
       },
     );
-    expectLastSlackSend("No thread");
+    expectSlackSend({ content: "No thread" });
   });
 
   it("does not auto-inject threadTs when sending to different channel", async () => {
@@ -473,10 +586,9 @@ describe("handleSlackAction", () => {
         replyToMode: "all",
       },
     );
-    expect(sendSlackMessage).toHaveBeenCalledWith("channel:C999", "Other channel", {
-      mediaUrl: undefined,
-      threadTs: undefined,
-      blocks: undefined,
+    expectSlackSend({
+      target: "channel:C999",
+      content: "Other channel",
     });
   });
 
@@ -495,7 +607,7 @@ describe("handleSlackAction", () => {
         replyToMode: "all",
       },
     );
-    expectLastSlackSend("Explicit wins", "9999999999.999999");
+    expectSlackSend({ content: "Explicit wins", threadTs: "9999999999.999999" });
   });
 
   it("handles channel target without prefix when replyToMode=all", async () => {
@@ -508,10 +620,10 @@ describe("handleSlackAction", () => {
         replyToMode: "all",
       },
     );
-    expect(sendSlackMessage).toHaveBeenCalledWith("C123", "Bare target", {
-      mediaUrl: undefined,
+    expectSlackSend({
+      target: "C123",
+      content: "Bare target",
       threadTs: "1111111111.111111",
-      blocks: undefined,
     });
   });
 

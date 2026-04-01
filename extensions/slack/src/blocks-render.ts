@@ -12,6 +12,8 @@ const SLACK_PLAIN_TEXT_MAX = 75;
 const SLACK_MAX_BLOCKS = 50;
 const SLACK_MAX_TABLE_COLUMN_WIDTH = 24;
 const SLACK_MAX_TABLE_CELL_CHARS = 48;
+const SLACK_NATIVE_TABLE_MAX_COLUMNS = 20;
+const SLACK_NATIVE_TABLE_MAX_ROWS = 100;
 const QUICKCHART_BASE_URL = "https://quickchart.io/chart";
 
 export type SlackBlock = Block | KnownBlock;
@@ -438,6 +440,76 @@ export function buildSlackTableSectionBlocks(params: SlackTableRenderInput): Sla
   return validateSlackBlocksArray(blocks) as SlackBlock[];
 }
 
+function canRenderNativeSlackTable(params: {
+  columns: Array<{ key: string; label: string; align: "left" | "right" }>;
+  rows: SlackTableRow[];
+}): boolean {
+  return (
+    params.columns.length > 0 &&
+    params.columns.length <= SLACK_NATIVE_TABLE_MAX_COLUMNS &&
+    params.rows.length + 1 <= SLACK_NATIVE_TABLE_MAX_ROWS
+  );
+}
+
+function createSlackRawTextCell(text: string) {
+  return {
+    type: "raw_text" as const,
+    text: truncateSlackText(text, SLACK_MAX_TABLE_CELL_CHARS),
+  };
+}
+
+export function buildSlackNativeTableBlocks(
+  params: SlackTableRenderInput,
+): SlackBlock[] | undefined {
+  const rows = Array.isArray(params.rows) ? params.rows.filter(Boolean) : [];
+  const limitedRows =
+    typeof params.maxRows === "number" && params.maxRows > 0 ? rows.slice(0, params.maxRows) : rows;
+
+  if (limitedRows.length === 0) {
+    return createSlackEmptyStateBlocks(
+      params.title,
+      params.emptyText?.trim() || "No rows to display.",
+    );
+  }
+
+  const columns = normalizeTableColumns(limitedRows, params.columns);
+  if (!canRenderNativeSlackTable({ columns, rows: limitedRows })) {
+    return undefined;
+  }
+
+  const blocks: SlackBlock[] = [];
+  if (params.title?.trim()) {
+    pushValidatedBlock(
+      blocks,
+      createSlackSectionBlock(`*${truncateSlackText(params.title.trim(), 120)}*`),
+    );
+  }
+
+  pushValidatedBlock(blocks, {
+    type: "table",
+    rows: [
+      columns.map((column) => createSlackRawTextCell(column.label)),
+      ...limitedRows.map((row) =>
+        columns.map((column) => createSlackRawTextCell(normalizeTableCell(row[column.key]))),
+      ),
+    ],
+    column_settings: columns.map((column) => ({
+      align: column.align,
+      is_wrapped: true,
+    })),
+  });
+
+  if (limitedRows.length < rows.length) {
+    appendTruncationNotice(blocks, params.title?.trim() || "Table");
+  }
+
+  return validateSlackBlocksArray(blocks) as SlackBlock[];
+}
+
+export function buildSlackTableBlocks(params: SlackTableRenderInput): SlackBlock[] {
+  return buildSlackNativeTableBlocks(params) ?? buildSlackTableSectionBlocks(params);
+}
+
 export function buildQuickChartImageUrl(params: SlackChartRenderInput): string {
   const search = new URLSearchParams();
   const config = typeof params.config === "string" ? params.config : JSON.stringify(params.config);
@@ -490,7 +562,7 @@ export function buildSlackAnalyticsBlocks(
   }
   if (params.table) {
     blocks.push(
-      ...buildSlackTableSectionBlocks({
+      ...buildSlackTableBlocks({
         ...params.table,
         title: params.table.title ?? "Table",
       }),

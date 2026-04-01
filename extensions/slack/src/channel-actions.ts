@@ -9,7 +9,13 @@ import { handleSlackAction } from "./action-runtime.js";
 import { isSlackInteractiveRepliesEnabled } from "./interactive-replies.js";
 import { handleSlackMessageAction } from "./message-action-dispatch.js";
 import { extractSlackToolSend, listSlackMessageActions } from "./message-actions.js";
-import { createSlackMessageToolBlocksSchema } from "./message-tool-schema.js";
+import {
+  createSlackMessageToolBlocksSchema,
+  createSlackMessageToolCanvasSchema,
+  createSlackMessageToolChartSchema,
+  createSlackMessageToolKpisSchema,
+  createSlackMessageToolTableSchema,
+} from "./message-tool-schema.js";
 import { resolveSlackChannelId } from "./targets.js";
 
 type SlackActionInvoke = (
@@ -42,6 +48,10 @@ export function createSlackActions(
         ? {
             properties: {
               blocks: Type.Optional(createSlackMessageToolBlocksSchema()),
+              kpis: Type.Optional(createSlackMessageToolKpisSchema()),
+              table: Type.Optional(createSlackMessageToolTableSchema()),
+              chart: Type.Optional(createSlackMessageToolChartSchema()),
+              canvas: Type.Optional(createSlackMessageToolCanvasSchema()),
             },
           }
         : null,

@@ -57,10 +57,11 @@ export async function handleSlackMessageAction(params: {
     const kpis = readJsonLikeParam(actionParams, "kpis");
     const table = readJsonLikeParam(actionParams, "table");
     const chart = readJsonLikeParam(actionParams, "chart");
-    if (!content && !mediaUrl && !blocks && !kpis && !table && !chart) {
+    const canvas = readJsonLikeParam(actionParams, "canvas");
+    if (!content && !mediaUrl && !blocks && !kpis && !table && !chart && !canvas) {
       throw new Error("Slack send requires message, blocks, media, or rich helper payloads.");
     }
-    if (mediaUrl && (blocks || kpis || table || chart)) {
+    if (mediaUrl && (blocks || kpis || table || chart || canvas)) {
       throw new Error("Slack send does not support blocks or rich helpers with media.");
     }
     const threadId = readStringParam(actionParams, "threadId");
@@ -77,6 +78,7 @@ export async function handleSlackMessageAction(params: {
         ...(kpis ? { kpis } : {}),
         ...(table ? { table } : {}),
         ...(chart ? { chart } : {}),
+        ...(canvas ? { canvas } : {}),
       },
       cfg,
       ctx.toolContext,
